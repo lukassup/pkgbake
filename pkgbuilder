@@ -1,0 +1,257 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import json
+import re
+import sys
+from datetime import datetime
+from jinja2 import Template
+from urllib import request
+from urllib.error import HTTPError
+
+# Maintainer metadata to be inserted into PKGBUILD
+maintainer = {
+    "full_name": "Your Name",
+    "email": "your email at example dot com"
+}
+
+# Universal PKGBUILD header and footer templates
+_pkgbuild_header = """\
+# Generated on: {{ date }}
+# Maintainer: {{ maintainer['full_name'] }} <{{ maintainer['email'] }}>
+
+"""
+
+_pkgbuild_footer = """\
+
+# vim:set ts=2 sw=2 et:
+"""
+
+# Each pkgbuild template must have a corresponding render_template function
+
+pkgbuilds = {
+# Ruby Gem PKGBUILD template
+"ruby": _pkgbuild_header + """\
+_gemname={{ package['name'] }}
+pkgname=ruby-${_gemname//_/-}
+pkgver={{ package['version'] }}
+pkgrel=1
+pkgdesc="{{ package['info'] }}"
+arch=(any)
+url="{{ package['homepage_uri'] }}"
+license=({% for license in package['licenses'] %}'{{ license }}' {% endfor %})
+depends=('ruby'{% for dep in package['dependencies']['runtime'] %}
+        'ruby-{{ dep['name']|replace("_", "-") }}'{% endfor %})
+makedepends=('rubygems'{% for dep in package['dependencies']['development'] %}
+        'ruby-{{ dep['name']|replace("_", "-") }}'{% endfor %})
+source=(http://gems.rubyforge.org/gems/$_gemname-$pkgver.gem)
+noextract=($_gemname-$pkgver.gem)
+sha256sums=('{{ package['sha'] }}')
+
+package() {
+  cd "$srcdir"
+  # _gemdir is defined inside package() because if ruby[gems] is not installed on
+  # the system, makepkg will exit with an error when sourcing the PKGBUILD.
+  local _gemdir="$(ruby -rubygems -e'puts Gem.default_dir')"
+
+  gem install --no-user-install --ignore-dependencies -i "$pkgdir$_gemdir" -n "$pkgdir/usr/bin" \\
+    "$_gemname-$pkgver.gem"
+}
+""" + _pkgbuild_footer,
+
+# NodeJS package PKGBUILD template
+"nodejs": _pkgbuild_header + """\
+_npmname={{ package['name'] }}
+pkgname=nodejs-{{ package['name']|lower|replace("_", "-") }}
+pkgver={{ package['version'] }}
+pkgrel=1
+pkgdesc="{{ package['description'] }}"
+arch=('any')
+url="{{ package['homepage'] }}"
+license=('{{ package['license'] }}')
+depends=('nodejs'{% for dep in depends %}
+        'nodejs-{{ dep|lower|replace("_", "-") }}'{% endfor %})
+makedepends=('npm')
+optdepends=({% for dep in optdepends %}'nodejs-{{ dep|lower|replace("_", "-") }}'
+        {% endfor %})
+source=("https://registry.npmjs.org/$_npmname/-/$_npmname-$pkgver.tgz")
+noextract=($_npmname-$pkgver.tgz)
+sha1sums=('{{ package['dist']['shasum'] }}')
+
+package() {
+  npm install -g --user root --prefix "$pkgdir"/usr "$srcdir"/$_npmname-$pkgver.tgz
+  rm -r "$pkgdir"/usr/etc
+  mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "../../../lib/node_modules/$_npmname/LICENSE*" "$pkgdir/usr/share/licenses/$pkgname/"
+}
+""" + _pkgbuild_footer,
+
+# Python package PKGBUILD template
+"python": _pkgbuild_header + """\
+_pipname={{ package['name'] }}
+pkgname=python-{{ package['name']|lower|replace("_", "-") }}
+pkgver={{ current_version }}
+pkgrel=1
+pkgdesc="{{ package['summary'] }}"
+arch=('any')
+url="{{ package['home_page'] }}"
+license=('{{ package['license'] }}')
+depends=('python')
+makedepends=()
+options=(!emptydirs)
+source=({% for url in sources %}'{{ url }}' {% endfor %})
+md5sums=({% for sum in checksums %}'{{ sum }}' {% endfor %})
+
+package() {
+  cd "${srcdir}/${_pipname}-${pkgver}"
+  python setup.py install --root="${pkgdir}/" --optimize=1
+}
+""" + _pkgbuild_footer
+}
+
+
+def usage(*args):
+    for arg in args:
+        print("***", arg, file=sys.stderr)
+    print("USAGE:", file=sys.stderr)
+    for pkgbuild in pkgbuilds:
+        print(" *", sys.argv[0], pkgbuild, "package_name", file=sys.stderr)
+
+
+# Install default opener to follow redirects
+request.install_opener(request.build_opener())
+
+def get_json(url):
+    with request.urlopen(url) as response:
+        return json.loads(response.read().decode('UTF-8'))
+
+
+def gem_info(name):
+    return get_json('https://rubygems.org/api/v1/gems/' + name + '.json')
+
+
+def pip_info(name):
+    return get_json('https://pypi.python.org/pypi/' + name + '/json')
+
+
+def npm_info(name):
+    return get_json('https://registry.npmjs.org/' + name + '/latest')
+
+
+def render_ruby(name, pkgbuild):
+    """
+    Ruby Gem PKGBUILD template renderer
+    """
+
+    # rubygems.org JSON API provides the latest package metadata
+    # so it is ready to be inserted into the template
+
+    return pkgbuild.render(
+        package     = gem_info(name),
+        maintainer  = maintainer,
+        date        = datetime.today().strftime("%c"))
+
+
+def render_nodejs(name, pkgbuild):
+    """
+    NodeJS package PKGBUILD template renderer
+    """
+
+    # npmjs.org JSON API provides the latest package metadata
+    # so it is ready to be inserted into the template
+
+    pkg = npm_info(name)
+
+    devdepends  = set(pkg.get('devDependencies', []))
+    optdepends  = set(pkg.get('optionalDependencies', []))
+    depends     = set(pkg.get('dependencies', [])) - devdepends - optdepends
+
+    devdepends = [ dep + ': development' for dep in devdepends ]
+    optdepends = [ dep + ': optional' for dep in optdepends ]
+    depends = list(depends)
+
+    return pkgbuild.render(
+        package     = pkg,
+        optdepends  = optdepends + devdepends,
+        depends     = depends,
+        maintainer  = maintainer,
+        date        = datetime.today().strftime("%c"))
+
+
+def render_python(name, pkgbuild):
+    """
+    Python package PKGBUILD template renderer
+    """
+
+    # TODO
+    # * Dependecy management
+    # * Wheel distribution installs
+
+    pkg = pip_info(name)
+
+    # pypi.org JSON API provides ALL package version metadata but we only care
+    # about the latest one. First -- filter only stable versions (no alphas,
+    # betas, release candidates and so on). Assuming stable versions should
+    # consist of numbers and optionally dots in between them ONLY
+
+    versions = list(filter(
+            lambda x: re.search(r'^(\d+\.)*\d+$', x),
+            pkg['releases'].keys()))
+
+    current = sorted(versions)[-1] # get the latest one
+
+    # get source package distribution(s)
+    sources = list(filter(
+            lambda x: x['packagetype'] == "sdist",
+            pkg['releases'][current]))
+
+    # it is also possible to filter by packages which consist of
+    # compressed tarballs
+    #sources = filter(
+    #        lambda x: re.search(r'\.tar(\.(gz|xz|bz2))?$', x['filename']),
+    #        pkg['releases'][current])
+
+    return pkgbuild.render(
+        package     = pkg['info'],
+        version     = current,
+        sources     = [ file['url'] for file in sources ],
+        checksums   = [ file['md5_digest'] for file in sources ],
+        maintainer  = maintainer,
+        date        = datetime.today().strftime("%c"))
+
+
+def main():
+
+    try:
+        template, package = sys.argv[1:3]
+    except ValueError as e:
+        usage("Script takes two arguments", str(e))
+        sys.exit(1)
+    except Exception as e:
+        usage("An error occured", str(e))
+        raise e
+        sys.exit(32)
+    if template.lower() not in pkgbuilds:
+        usage("Unsupported pkgbuild type: \"{0}\"".format(template))
+        sys.exit(1)
+
+    try:
+        pkgbuild = Template(pkgbuilds[template])
+
+        # Map each pkgbuild template to the corresponding render function
+        # then call (render) it and print the output
+        print(globals()["render_" + template](package, pkgbuild))
+    except HTTPError as e:
+        if e.code == 404:
+            message = "Package could not be found or the JSON API URL has changed"
+
+        usage(message, "{0} [{1}: {2}]".format(e.url, e.code, e.reason))
+    except Exception as e:
+        usage("An error occured", str(e))
+        raise e
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
