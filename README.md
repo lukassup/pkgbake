@@ -1,7 +1,21 @@
 # pkgbuilder
+
 PKGBUILD builder for Arch linux User repository
 
 Written in Python 3. Based on PKGBUILD templates provided by `pacman`.
+
+Currently supports generating PKGBUILDs for Ruby Gems, NodeJS and Python packages.
+
+> **NOTE:** This script does not manage dependecies in any sane way so you will
+> stil have to manually do that, *especially*, if you intend to submit your
+> PKGBUILDs to the AUR. Not all packages in the AUR/Arch repos follow naming
+> conventions `python-`*`pkgname`* or `ruby-`*`pkgname`* and so on...
+> Script assumes that they *do* -- package names are printed all lowercase and
+> underscores are replaced with dashes. Another thing is that you must check
+> and test the `package()` function -- it might need some tuning for specific
+> packages (*duh! it's based on a template*). **This script is not meant to
+> produce the final PKGBUILD result -- it's just a quicker way to generate
+> them. USE AT YOUR OWN RISK**.
 
 ## USAGE
 
