@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import deb_meta
 import json
 import re
 import sys
@@ -106,6 +107,37 @@ package() {
   cd "${srcdir}/${_pipname}-${pkgver}"
   python setup.py install --root="${pkgdir}/" --optimize=1
 }
+""" + _pkgbuild_footer,
+
+# .deb package PKGBUILD template
+"debian": _pkgbuild_header + """\
+pkgname={{ package['pkgname'] }}-debian
+pkgdesc="{{ package['pkgdesc'] }}"
+pkgver={{ package['pkgver'] }}
+pkgrel=1
+arch=('i686' 'x86_64') # {{ package['arch'] }}
+url="{{ package['url'] }}"
+license=('GPL') # to be added manually!
+source=({{ source }})
+md5sums=('SKIP')
+depends=({% for dep in package['depends'] %}'{{ dep }}'
+        {% endfor %})
+makedepends=({% for dep in package['makedepends'] %}'{{ dep }}'
+        {% endfor %})
+optdepends=({% for dep in package['optdepends'] %}'{{ dep }}'
+        {% endfor %})
+provides=({% for package in package['provides'] %}'{{ package }}'
+        {% endfor %})
+conflicts=({% for package in package['conflicts'] %}'{{ package }}'
+        {% endfor %})
+replaces=({% for package in package['replaces'] %}'{{ package }}'
+        {% endfor %})
+
+package() {
+    mkdir data
+    tar xf data.tar.xz --directory data/
+    cp -r data/* ${pkgdir}
+}
 """ + _pkgbuild_footer
 }
 
@@ -189,16 +221,16 @@ def render_python(name, pkgbuild):
 
     pkg = pip_info(name)
 
-    # pypi.org JSON API provides ALL package version metadata but we only care
-    # about the latest one. First -- filter only stable versions (no alphas,
-    # betas, release candidates and so on). Assuming stable versions should
-    # consist of numbers and optionally dots in between them ONLY
+    # pypi.org JSON API provides metadata for ALL package versions but we only
+    # care about the latest one. First -- filter only stable versions (no
+    # alphas, betas, release candidates and so on). Assuming stable versions
+    # should consist of numbers and optionally dots in between them ONLY
 
     versions = list(filter(
             lambda x: re.search(r'^(\d+\.)*\d+$', x),
             pkg['releases'].keys()))
 
-    current = sorted(versions)[-1] # get the latest one
+    current = sorted(versions)[-1]
 
     # get source package distribution(s)
     sources = list(filter(
@@ -216,6 +248,37 @@ def render_python(name, pkgbuild):
         version     = current,
         sources     = [ file['url'] for file in sources ],
         checksums   = [ file['md5_digest'] for file in sources ],
+        maintainer  = maintainer,
+        date        = datetime.today().strftime("%c"))
+
+
+def render_debian(url, pkgbuild):
+    """
+    Debian package PKGBUILD template renderer
+    """
+
+    # TODO: add support for local .deb's (should be fairly trivial)
+
+    meta = deb_meta.get_metadata(url)
+    package = deb_meta.parse_metadata(meta)
+
+    to_split = [
+        "depends",
+        "optdepends",
+        "makedepends",
+        "replaces",
+        "provides",
+        "conflicts"
+    ]
+
+    for key in to_split:
+        if key in package:
+            package[key] = package[key].split(", ")
+
+    print(package)
+    return pkgbuild.render(
+        package     = package,
+        source      = url,
         maintainer  = maintainer,
         date        = datetime.today().strftime("%c"))
 
