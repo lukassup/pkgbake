@@ -26,9 +26,9 @@ Currently supports generating PKGBUILDs for Ruby Gems, NodeJS and Python package
 ```
 USAGE:
  * ./pkgbake python package_name
- * ./pkgbake debian package_name
  * ./pkgbake nodejs package_name
  * ./pkgbake ruby package_name
+ * ./pkgbake debian url_to_deb_file
 ```
 
 ## DEPENDENCIES
