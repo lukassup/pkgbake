@@ -1,4 +1,4 @@
-# pkgbuilder
+# pkgbake
 
 PKGBUILD builder for Arch linux User repository
 
@@ -17,13 +17,18 @@ Currently supports generating PKGBUILDs for Ruby Gems, NodeJS and Python package
 > produce the final PKGBUILD result -- it's just a quicker way to generate
 > them. USE AT YOUR OWN RISK**.
 
+## NEWS
+
+* Added preliminary support for creating PKGBUILDs for remote .deb packages.
+
 ## USAGE
 
 ```
 USAGE:
- * ./pkgman nodejs package_name
- * ./pkgman ruby package_name
- * ./pkgman python package_name
+ * ./pkgbake python package_name
+ * ./pkgbake debian package_name
+ * ./pkgbake nodejs package_name
+ * ./pkgbake ruby package_name
 ```
 
 ## DEPENDENCIES
@@ -39,7 +44,7 @@ sudo pacman -Sy python-jinja
 
 For example, we want to generate a PKGBUILD script for the Rails Ruby Gem
 ```sh
-./pkgbuilder ruby rails
+./pkgbake ruby rails
 ```
 
 Produces this PKGBUILD script
